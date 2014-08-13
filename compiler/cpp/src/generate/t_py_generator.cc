@@ -1282,6 +1282,10 @@ void t_py_generator::generate_service_client(t_service* tservice) {
     vector<t_field*>::const_iterator fld_iter;
     string funname = (*f_iter)->get_name();
 
+    if (gen_tornado_) {
+      indent(f_service_) << "@gen.coroutine" << endl;
+    }
+
     // Open function
     indent(f_service_) <<
       "def " << function_signature(*f_iter, false) << ":" << endl;
@@ -1302,7 +1306,7 @@ void t_py_generator::generate_service_client(t_service* tservice) {
     }
 
     indent(f_service_) <<
-      "self.send_" << funname << "(";
+      (gen_tornado_ ? "yield " : "") << "self.send_" << funname << "(";
 
     bool first = true;
     for (fld_iter = fields.begin(); fld_iter != fields.end(); ++fld_iter) {
@@ -1321,7 +1325,10 @@ void t_py_generator::generate_service_client(t_service* tservice) {
       if (gen_twisted_) {
         f_service_ << "return d" << endl;
       } else if (gen_tornado_) {
-        f_service_ << "return future" << endl;
+        f_service_ << "result = yield future" << endl;
+        if (!(*f_iter)->get_returntype()->is_void()) {
+          f_service_ << indent() << "raise gen.Return(result)" << endl;
+        }
       } else {
         if (!(*f_iter)->get_returntype()->is_void()) {
           f_service_ << "return ";
@@ -1337,6 +1344,10 @@ void t_py_generator::generate_service_client(t_service* tservice) {
     }
     indent_down();
     f_service_ << endl;
+
+    if (gen_tornado_) {
+      indent(f_service_) << "@gen.coroutine" << endl;
+    }
 
     indent(f_service_) <<
       "def send_" << function_signature(*f_iter, false) << ":" << endl;
@@ -1370,7 +1381,7 @@ void t_py_generator::generate_service_client(t_service* tservice) {
       f_service_ <<
         indent() << "args.write(oprot)" << endl <<
         indent() << "oprot.writeMessageEnd()" << endl <<
-        indent() << "oprot.trans.flush()" << endl;
+        indent() << (gen_tornado_ ? "yield " : "") << "oprot.trans.flush()" << endl;
     } else {
       f_service_ <<
         indent() << "args.write(self._oprot)" << endl <<
@@ -1378,13 +1389,11 @@ void t_py_generator::generate_service_client(t_service* tservice) {
         indent() << "self._oprot.trans.flush()" << endl;
     }
 
+    f_service_ << endl;
     indent_down();
 
     if (!(*f_iter)->is_oneway()) {
       std::string resultname = (*f_iter)->get_name() + "_result";
-      // Open function
-      f_service_ <<
-        endl;
       if (gen_twisted_ || gen_tornado_) {
         f_service_ <<
           indent() << "def recv_" << (*f_iter)->get_name() <<
