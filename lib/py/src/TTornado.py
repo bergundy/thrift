@@ -70,6 +70,7 @@ class TTornadoStreamTransport(TTransportBase):
         self.io_loop = io_loop or ioloop.IOLoop.current()
         self.__wbuf = BytesIO()
         self._read_lock = _Lock()
+        self._write_lock = _Lock()
 
         # servers provide a ready-to-go stream
         self.stream = stream
@@ -143,13 +144,18 @@ class TTornadoStreamTransport(TTransportBase):
     def write(self, buf):
         self.__wbuf.write(buf)
 
+    @gen.coroutine
     def flush(self):
         frame = self.__wbuf.getvalue()
         # reset wbuf before write/flush to preserve state on underlying failure
         frame_length = struct.pack('!i', len(frame))
         self.__wbuf = BytesIO()
         with self.io_exception_context():
-            return self.stream.write(frame_length + frame)
+            # serialize writes to the underlying socket, as tornado will only notify one future
+            # if there are writes in parallel
+            # TODO: is there a performance impact? Probably the same as a synchronous client
+            with (yield self._write_lock.acquire()):
+                yield self.stream.write(frame_length + frame)
 
 
 class TTornadoServer(tcpserver.TCPServer):
